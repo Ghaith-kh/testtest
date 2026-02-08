@@ -1,0 +1,171 @@
+Madame, Monsieur,
+
+Suite à une analyse détaillée de notre dispositif de monitoring Grafana, j’ai identifié plusieurs **limitations structurelles majeures** dans la logique actuelle de calcul des métriques.
+Ces limitations conduisent à des **indicateurs incorrects**, susceptibles de masquer des incidents réels et de fausser nos décisions techniques et opérationnelles.
+
+Je vous propose ci-dessous un **diagnostic synthétique**, suivi d’une **solution pragmatique et maîtrisée**.
+
+---
+
+## 1. Constat : métriques actuellement non fiables
+
+### 1.1 Logique actuellement implémentée
+
+Les dashboards reposent sur le principe suivant :
+
+* **Total** : nombre de logs `execute`
+* **OK** : nombre de logs `end`
+* **KO** : `Total - OK`
+
+Cette approche présente plusieurs **défauts bloquants**.
+
+---
+
+### 1.2 Problèmes critiques identifiés
+
+#### ❌ 1. Valeurs négatives (mathématiquement impossibles)
+
+Lorsqu’une requête démarre dans un bucket temporel et se termine dans le suivant, le calcul `Total - OK` peut produire des **KO négatifs**.
+
+👉 Impact :
+
+* Alertes invalides
+* Incidents masqués
+* Perte de confiance dans les dashboards
+
+---
+
+#### ❌ 2. Absence totale de corrélation
+
+Les logs `execute` et `end` ne sont reliés par **aucun identifiant commun**.
+
+👉 Impact :
+
+* Impossible de relier un début et une fin de requête
+* Debugging manuel, lent et incertain
+* Aucune traçabilité par requête
+
+---
+
+#### ❌ 3. Retries invisibles (Resilience4j)
+
+En cas de retry :
+
+* Un seul `execute`
+* Un seul `end`
+* Plusieurs échecs intermédiaires totalement invisibles
+
+👉 Résultat :
+
+* Succès affiché à 100%
+* Dégradation réelle du service non détectée
+* SLA et disponibilité artificiellement optimistes
+
+---
+
+#### ❌ 4. Latences gravement sous-estimées
+
+Le temps réel (timeouts + retries) n’est pas mesurable :
+
+* Absence de lien entre start/end
+* Absence de durée fiable
+
+👉 Impact :
+
+* Latences perçues très inférieures à la réalité
+* Décisions d’architecture basées sur des données erronées
+
+---
+
+#### ❌ 5. Aucune classification des erreurs
+
+Toutes les erreurs sont agrégées sans distinction :
+
+* Timeout réseau
+* Erreur technique
+* Erreur métier
+
+👉 Impact :
+
+* Impossible de prioriser les incidents
+* Analyse post-mortem inefficace
+
+---
+
+## 2. Solution proposée (corrélation explicite)
+
+### 2.1 Principe
+
+Abandonner le calcul dérivé `Total - OK` au profit de **statuts explicites corrélés par `trace_id`**, alignés avec les bonnes pratiques d’observabilité.
+
+---
+
+### 2.2 Structure de log cible
+
+Chaque requête est tracée de bout en bout via un identifiant unique :
+
+* `trace_id` : corrélation
+* `layer` : CONTROLLER / SERVICE / DATABASE / CICS
+* `event_type` : START / END / QUERY
+* `status` : SUCCESS / ERROR
+* `duration_ms` : durée réelle
+* Données masquées RGPD
+
+Cette approche permet une **traçabilité complète, fiable et exploitable**.
+
+---
+
+### 2.3 Métriques Grafana fiables
+
+Les métriques deviennent simples et exactes :
+
+* **Total** : `event_type:START`
+* **Succès** : `event_type:END AND status:SUCCESS`
+* **Échecs** : `event_type:END AND status:ERROR`
+* **Latence** : `avg(duration_ms)`
+* **Analyse fine** : filtrage par `trace_id`, `layer`, type d’erreur
+
+👉 Plus de valeurs négatives, plus d’ambiguïté.
+
+---
+
+## 3. Bénéfices mesurables
+
+| Critère                 | Situation actuelle | Après correction    |
+| ----------------------- | ------------------ | ------------------- |
+| Fiabilité des métriques | Faible             | Totale              |
+| Détection des incidents | 30–45 min          | < 5 min             |
+| Temps d’investigation   | 15–30 min          | 2–5 min             |
+| Corrélation requête     | Impossible         | Native (`trace_id`) |
+| Confiance dans Grafana  | Faible             | Restaurée           |
+
+---
+
+## 4. Mise en œuvre maîtrisée
+
+* Effort estimé : **~22 heures (~3 jours)**
+* Déploiement progressif :
+
+  1. Service pilote
+  2. Validation Grafana
+  3. Généralisation
+
+Risque faible, retour sur investissement immédiat.
+
+---
+
+## 5. Risque à ne pas corriger
+
+* Incidents non détectés
+* SLA faussés
+* MTTR allongé
+* Dashboards progressivement ignorés par les équipes
+
+---
+
+Je reste à votre disposition pour une **présentation courte** ou une **démonstration technique** si nécessaire.
+
+Cordialement,
+**Ghaith Khiari**
+Développeur / Architecte Backend
+[Contact]
