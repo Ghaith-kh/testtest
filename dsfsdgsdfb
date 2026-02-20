@@ -1,0 +1,8 @@
+Bonjour,
+
+Nous avons identifié un problème de logging sur le composant WSIPKE02 : le champ `fraudDetails` apparaît sous la forme `com.cl.wsipke02.model.Frauddetails@156bd` au lieu de ses valeurs réelles (scoring, rule_code, decision_code).
+
+Cause : la classe `Frauddetails` ne surcharge pas `toString()`.
+Fix : ajouter `@ToString` (Lombok) ou overrider `toString()` manuellement.
+
+Cordialement
