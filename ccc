@@ -1,0 +1,79 @@
+📋 Titre du ticket
+[BUG] CorrelationIdFilter - IllegalArgumentException lors du parsing UUID sans tirets
+
+📝 Description du ticket
+Le CorrelationIdFilter crash avec une IllegalArgumentException lorsqu'un 
+Correlation ID au format UUID sans tirets est reçu dans le header HTTP.
+
+Exemple de header reçu : X-Correlation-ID: ea4616d13076c3b53362e0a96898a89c
+Erreur : java.lang.IllegalArgumentException: Invalid UUID string
+
+Ce format (32 caractères sans tirets) est envoyé par certains systèmes 
+upstream (API Gateway, Load Balancer) et doit être supporté.
+
+Impact : Toutes les requêtes avec ce format de Correlation ID échouent 
+avec une erreur 500.
+
+💬 Commentaire JIRA
+══════════════════════════════════════════════════════════════════════════════
+PROBLÈME
+══════════════════════════════════════════════════════════════════════════════
+
+Le CorrelationIdFilter utilise UUID.fromString() pour parser le Correlation ID 
+reçu dans le header HTTP.
+
+Cette méthode exige le format UUID standard avec tirets (36 caractères) :
+  ✅ ea4616d1-3076-c3b5-3362-e0a96898a89c
+
+Or, certains systèmes upstream envoient le format sans tirets (32 caractères) :
+  ❌ ea4616d13076c3b53362e0a96898a89c
+
+Résultat : java.lang.IllegalArgumentException: Invalid UUID string
+
+Stacktrace :
+  at java.base/java.util.UUID.fromString(UUID.java:282)
+  at lcl.common.logging.filter.CorrelationIdFilter.setupLogContextHolder(CorrelationIdFilter.java:59)
+
+══════════════════════════════════════════════════════════════════════════════
+ANALYSE
+══════════════════════════════════════════════════════════════════════════════
+
+Code problématique (ligne 59) :
+  LogContextHolder.INSTANCE.corrId(UUID.fromString(correlationId));
+
+Le problème est double :
+1. UUID.fromString() n'accepte que le format avec tirets
+2. LogContextHolder.corrId() exige un objet UUID
+
+Le Correlation ID n'a pas besoin d'être un UUID valide pour fonctionner 
+dans le MDC. C'est simplement un identifiant de corrélation qui peut être 
+n'importe quelle chaîne de caractères.
+
+══════════════════════════════════════════════════════════════════════════════
+CORRECTION
+══════════════════════════════════════════════════════════════════════════════
+
+Remplacement de LogContextHolder par MDC.put() qui accepte directement 
+une String sans conversion :
+
+AVANT :
+  if (correlationId != null) {
+      LogContextHolder.INSTANCE.corrId(UUID.fromString(correlationId));
+  }
+
+APRÈS :
+  if (correlationId != null) {
+      MDC.put(MdcKeys.CORRELATION_ID, correlationId);
+  }
+
+Avantages :
+- Accepte tous les formats de Correlation ID (avec/sans tirets, custom)
+- Plus robuste et tolérant aux différents formats upstream
+- Code simplifié sans conversion inutile
+- Aucun impact sur les logs (le MDC contient toujours le Correlation ID)
+
+Tests effectués :
+- UUID avec tirets : ✅ OK
+- UUID sans tirets : ✅ OK  
+- String custom : ✅ OK
+- Null (génération auto) : ✅ OK
