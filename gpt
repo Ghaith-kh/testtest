@@ -1,0 +1,6 @@
+Problem
+Les logs affichent l’erreur B0088 DONNEES EN ENTREE NON RENSEIGNEES sans préciser la donnée manquante.
+Analyse
+Vérification côté Java effectuée : le traitement et les logs sont corrects. L’application reçoit cette erreur depuis le mainframe (CICS) via le process appelé. Le détail de la donnée manquante n’est pas retourné par le mainframe.
+Solution
+Évolution à faire côté mainframe pour retourner le nom de la donnée manquante dans la réponse afin d’enrichir la log côté application.
