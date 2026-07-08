@@ -1,6 +1,7 @@
 ---
 # =====================================================================
-# Recette : Intégration Prometheus (Micrometer + Actuator + config)
+# Recette principale : Intégration Prometheus
+# (Micrometer + Actuator + configuration standard LCL)
 # =====================================================================
 type: specs.openrewrite.org/v1beta/recipe
 name: com.lcl.rewrite.IntegrerPrometheus
@@ -9,7 +10,7 @@ description: >
   Ajoute spring-boot-starter-actuator et micrometer-registry-prometheus,
   puis pousse la configuration standard LCL (exposition endpoints, tags
   communs Grafana, histogrammes GC, métriques virtual threads) dans
-  application.properties et application.yml.
+  application.properties et application.yml/.yaml.
 recipeList:
   # ------------------------------------------------------------------
   # Dépendances
@@ -23,64 +24,18 @@ recipeList:
       scope: runtime
 
   # ------------------------------------------------------------------
-  # ACTUATOR / PROMETHEUS  (application.properties)
+  # Config application.properties (sous-recette avec précondition,
+  # car AddProperty ne supporte pas filePattern)
   # ------------------------------------------------------------------
-  - org.openrewrite.properties.AddProperty:
-      property: management.endpoints.web.exposure.include
-      value: prometheus,health,info,metrics,threaddump
-      filePattern: '**/src/main/resources/application*.properties'
-  - org.openrewrite.properties.AddProperty:
-      property: management.endpoint.prometheus.enabled
-      value: 'true'
-      filePattern: '**/src/main/resources/application*.properties'
-  - org.openrewrite.properties.AddProperty:
-      property: management.prometheus.metrics.export.enabled
-      value: 'true'
-      filePattern: '**/src/main/resources/application*.properties'
-  - org.openrewrite.properties.AddProperty:
-      property: management.endpoint.health.show-details
-      value: when_authorized
-      filePattern: '**/src/main/resources/application*.properties'
+  - com.lcl.rewrite.IntegrerPrometheusProperties
 
   # ------------------------------------------------------------------
-  # TAGS COMMUNS (dashboards Grafana/Prometheus)
-  # ------------------------------------------------------------------
-  - org.openrewrite.properties.AddProperty:
-      property: management.metrics.tags.application
-      value: ${spring.application.name}
-      filePattern: '**/src/main/resources/application*.properties'
-
-  # ------------------------------------------------------------------
-  # JVM GC - histogrammes pour percentiles p50/p95/p99
-  # ------------------------------------------------------------------
-  - org.openrewrite.properties.AddProperty:
-      property: management.metrics.enable.jvm
-      value: 'true'
-      filePattern: '**/src/main/resources/application*.properties'
-  - org.openrewrite.properties.AddProperty:
-      property: management.metrics.distribution.percentiles-histogram.jvm.gc.pause
-      value: 'true'
-      filePattern: '**/src/main/resources/application*.properties'
-  - org.openrewrite.properties.AddProperty:
-      property: management.metrics.distribution.percentiles.jvm.gc.pause
-      value: 0.5,0.95,0.99
-      filePattern: '**/src/main/resources/application*.properties'
-
-  # ------------------------------------------------------------------
-  # JVM THREADS (virtual threads si spring.threads.virtual.enabled=true)
-  # ------------------------------------------------------------------
-  - org.openrewrite.properties.AddProperty:
-      property: management.metrics.enable.jvm.threads
-      value: 'true'
-      filePattern: '**/src/main/resources/application*.properties'
-
-  # ------------------------------------------------------------------
-  # Équivalent pour les services en application.yml
-  # (clés composées quotées pour les props de type Map)
+  # Équivalent pour les services en application.yml / application.yaml
+  # (le pattern y*ml couvre les deux extensions)
   # ------------------------------------------------------------------
   - org.openrewrite.yaml.MergeYaml:
       key: $
-      filePattern: '**/src/main/resources/application*.yml'
+      filePattern: '**/src/main/resources/application.y*ml'
       yaml: |
         management:
           endpoints:
@@ -107,3 +62,62 @@ recipeList:
                 "jvm.gc.pause": true
               percentiles:
                 "jvm.gc.pause": 0.5,0.95,0.99
+
+---
+# =====================================================================
+# Sous-recette : properties Prometheus, restreinte par précondition
+# au seul fichier application.properties
+# =====================================================================
+type: specs.openrewrite.org/v1beta/recipe
+name: com.lcl.rewrite.IntegrerPrometheusProperties
+displayName: Config Prometheus dans application.properties uniquement
+description: >
+  Ajoute les properties Actuator/Prometheus standard LCL. La précondition
+  FindSourceFiles garantit que seul application.properties est modifié
+  (et pas les autres .properties du service : XD19, connecteurs, etc.).
+preconditions:
+  - org.openrewrite.FindSourceFiles:
+      filePattern: '**/src/main/resources/application.properties'
+recipeList:
+  # ------------------------------------------------------------------
+  # ACTUATOR / PROMETHEUS
+  # ------------------------------------------------------------------
+  - org.openrewrite.properties.AddProperty:
+      property: management.endpoints.web.exposure.include
+      value: prometheus,health,info,metrics,threaddump
+  - org.openrewrite.properties.AddProperty:
+      property: management.endpoint.prometheus.enabled
+      value: 'true'
+  - org.openrewrite.properties.AddProperty:
+      property: management.prometheus.metrics.export.enabled
+      value: 'true'
+  - org.openrewrite.properties.AddProperty:
+      property: management.endpoint.health.show-details
+      value: when_authorized
+
+  # ------------------------------------------------------------------
+  # TAGS COMMUNS (dashboards Grafana/Prometheus)
+  # ------------------------------------------------------------------
+  - org.openrewrite.properties.AddProperty:
+      property: management.metrics.tags.application
+      value: ${spring.application.name}
+
+  # ------------------------------------------------------------------
+  # JVM GC - histogrammes pour percentiles p50/p95/p99
+  # ------------------------------------------------------------------
+  - org.openrewrite.properties.AddProperty:
+      property: management.metrics.enable.jvm
+      value: 'true'
+  - org.openrewrite.properties.AddProperty:
+      property: management.metrics.distribution.percentiles-histogram.jvm.gc.pause
+      value: 'true'
+  - org.openrewrite.properties.AddProperty:
+      property: management.metrics.distribution.percentiles.jvm.gc.pause
+      value: 0.5,0.95,0.99
+
+  # ------------------------------------------------------------------
+  # JVM THREADS (virtual threads si spring.threads.virtual.enabled=true)
+  # ------------------------------------------------------------------
+  - org.openrewrite.properties.AddProperty:
+      property: management.metrics.enable.jvm.threads
+      value: 'true'
