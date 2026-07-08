@@ -1,0 +1,23 @@
+---
+# =====================================================================
+# Recette : Intégration du parent POM lcl-parent
+# =====================================================================
+type: specs.openrewrite.org/v1beta/recipe
+name: com.lcl.rewrite.IntegrerLclParent
+displayName: Remplace spring-boot-starter-parent par lcl-parent
+description: >
+  Bascule le <parent> du projet de spring-boot-starter-parent vers
+  lcl-parent, puis supprime les versions de dépendances devenues
+  redondantes (gérées par le dependencyManagement du parent).
+recipeList:
+  - org.openrewrite.maven.ChangeParentPom:
+      oldGroupId: org.springframework.boot
+      oldArtifactId: spring-boot-starter-parent
+      newGroupId: com.lcl
+      newArtifactId: lcl-parent
+      newVersion: 1.0.0            # <-- adapter à la version courante du lcl-parent
+      allowVersionDowngrades: false
+
+  # Nettoyage : retire les <version> déjà gérées par le nouveau parent
+  - org.openrewrite.maven.RemoveRedundantDependencyVersions:
+      onlyIfVersionsMatch: true
