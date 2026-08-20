@@ -1,0 +1,63 @@
+flowchart TD
+    START(["Client BPI<br/>demande un virement IP"]) --> P1["Récupérer les options<br/>debtor / creditor — XD19"]
+
+    P1 --> P2["Vérifier l'atteignabilité<br/>KE06"]
+
+    P2 --> D1{"Bénéficiaire<br/>atteignable ?"}
+    D1 -->|Non| REJ1(["Rejet fonctionnel<br/>aucun engagement"])
+
+    D1 -->|Oui| VOPZONE
+
+    subgraph VOPZONE["Bloc VOP — ✅ fonctionnement normal"]
+        direction TB
+        V1["Écrire les données du virement<br/>update_database (async)"]
+        V2["Lire les données VOP existantes<br/>select_database"]
+        V3["Journalisation dans le journal plant"]
+        V1 --> V2 --> V3
+        VNOTE["Écriture et lecture portent sur<br/>des données différentes<br/>→ pas de race condition"]
+    end
+
+    VOPZONE --> RISK
+
+    subgraph RISK["🔴 ZONE À RISQUE — engagement financier"]
+        direction TB
+
+        P5["💰 DEMANDER LE DÉBIT à KE07"]
+        P5 --> P6[("DB2 : ligne créée<br/>Id transaction IPA<br/>❌ AUCUN statut de sortie")]
+
+        P6 --> P7["💸 ÉMETTRE le pacs.008 vers CAPS<br/>POST /capsin/v1/sct"]
+
+        P7 --> D2{"Réponse<br/>de CAPS ?"}
+
+        D2 -->|"ACSC<br/>réglé"| S1["Sauvegarder la réponse"]
+        D2 -->|"RJCT<br/>rejet certain"| S2["Demander le recrédit à KE07"]
+        D2 -->|"TIMEOUT<br/>état INDÉTERMINÉ"| S3["Demander le recrédit à KE07"]
+    end
+
+    S1 --> OK(["Virement réglé ✅"])
+    S2 --> OK2(["Client remboursé ✅<br/>traitement correct"])
+
+    S3 --> KO1(["❌ FAILLE A — recrédit sur timeout<br/>─────────────<br/>Un timeout ne dit PAS que<br/>le pacs.008 n'est pas parti.<br/>Si émis : bénéficiaire payé<br/>+ client remboursé<br/>= PERTE SÈCHE BANQUE"])
+
+    P6 -.->|"crash entre débit<br/>et compensation"| KO2
+    P7 -.->|"OOM · rolling update<br/>SIGTERM · exception"| KO2
+
+    KO2(["❌ FAILLE B — ligne orpheline<br/>─────────────<br/>DB2 reste figé en 'débité'<br/>Aucun processus ne la relit<br/>= CLIENT DÉBITÉ SANS CONTREPARTIE<br/>et personne ne le sait"])
+
+    KO3["❌ FAILLE C — idempotence<br/>Si le recrédit timeout et qu'on retente,<br/>rien ne garantit que KE07<br/>ne compense pas deux fois"]
+    S2 -.-> KO3
+    S3 -.-> KO3
+
+    classDef danger fill:#b71c1c,stroke:#7a1212,color:#fff
+    classDef money fill:#e65100,stroke:#a03d00,color:#fff
+    classDef ok fill:#1b5e20,stroke:#0d3d11,color:#fff
+    classDef db fill:#4a148c,stroke:#2e0d57,color:#fff
+    classDef vop fill:#37474f,stroke:#1c262b,color:#fff
+    classDef note fill:#eceff1,stroke:#90a4ae,color:#263238
+
+    class KO1,KO2,KO3,S3 danger
+    class P5,P7 money
+    class OK,OK2,REJ1 ok
+    class P6 db
+    class V1,V2,V3 vop
+    class VNOTE note
