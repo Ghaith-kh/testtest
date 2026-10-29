@@ -1,0 +1,43 @@
+Contexte
+Je suis tech lead sur une flotte de microservices Spring Boot (domaine paiements SEPA, environnement bancaire réglementé PCI-DSS). Un POM parent Maven centralise les versions, les plugins et les règles enforcer pour tous les microservices. Outillage : GitLab CI, JFrog Artifactory (dépôt Maven) avec JFrog Xray. Renovate est DÉJÀ intégré dans ce repo ; Xray ne l'est PAS encore.
+
+Objectif
+Mettre en place un pipeline GitLab CI planifié une fois par jour qui :
+1. lance Renovate (existant) ;
+2. lance une analyse Xray des dépendances EFFECTIVES des microservices enfants (pas seulement du parent, dont le dependencyManagement seul ne résout aucune dépendance) ;
+3. applique les correctifs de vulnérabilités dans le POM parent (properties / dependencyManagement) ;
+4. produit UNE SEULE merge request sur le repo parent, regroupant les changements Renovate et Xray, avec une description détaillée par analyse.
+
+Étape 1 — Analyse avant tout code (ne modifie rien)
+- Lis la config Renovate existante (renovate.json / config.js, .gitlab-ci.yml, schedules) et explique-moi comment elle crée ses MR aujourd'hui.
+- Identifie comment obtenir la liste des microservices enfants (fichier de config, groupe GitLab, API GitLab) et propose l'option la plus maintenable.
+- Vérifie les prérequis JFrog : repo virtuel Maven Artifactory à utiliser pour la résolution (`jf mvn-config`), version de JFrog CLI, droits Xray du token, et si les repos des microservices sont indexés par Xray (watches/policies existantes).
+- Compare deux sources de vulnérabilités :
+  A) `jf audit --mvn` sur un clone de chaque microservice (reflète la branche principale) ;
+  B) interrogation de l'API Xray sur les derniers artefacts publiés de chaque microservice dans Artifactory (pas de clone, reflète ce qui est déployé).
+  Recommande A, B ou une combinaison, avec les compromis.
+- Propose une architecture pour fusionner Renovate et Xray dans une seule MR (ex. Renovate en groupName unique sur une branche fixe, puis job Xray qui committe sur la même branche et met à jour la description de la MR). Compare au moins 2 options avec leurs compromis.
+Présente-moi ce plan et ATTENDS ma validation avant d'implémenter.
+
+Étape 2 — Implémentation (après validation)
+- Job Xray : selon l'option validée (A ou B), collecte les CVE avec version corrigée disponible pour chaque microservice. Pour A, résolution Maven via le repo virtuel Artifactory configuré par `jf mvn-config`, sortie `--format=json`.
+- Agrégation : dédoublonne par groupId:artifactId, garde la plus petite version corrigeant toutes les CVE, sans changement de version MAJEURE automatique (les majeures sont seulement signalées).
+- Correctif : ne modifie le POM parent que pour les dépendances qu'il gère déjà ou qui sont transitives communes ; pour les versions en dur dans un enfant, ne touche pas l'enfant, liste-les dans la MR.
+- Vérification : `mvn -B verify` (enforcer inclus) sur le parent après modification ; si échec, retire le changement fautif et documente-le dans la MR.
+- MR unique et idempotente : branche fixe (ex. `deps/daily-security-update`), mise à jour de la MR existante au lieu d'en créer une nouvelle chaque jour, aucune MR si rien à changer.
+- Description de MR avec une section par analyse :
+  • Renovate : tableau dépendance / ancienne version / nouvelle version / type (patch, minor) ;
+  • Xray : tableau CVE / sévérité / CVSS / dépendance / version corrigée / microservices impactés ;
+  • À traiter côté microservices : CVE non corrigeables depuis le parent ;
+  • Majeures ignorées et CVE sans correctif disponible.
+- Planification : pipeline schedule GitLab quotidien ; les jobs ne tournent que sur `$CI_PIPELINE_SOURCE == "schedule"` (ou déclenchement manuel).
+
+Contraintes
+- Aucun secret dans le code : JF_URL, JF_ACCESS_TOKEN, token GitLab en variables CI masquées et protégées. Ne logge jamais les tokens.
+- Mode `DRY_RUN=true` disponible : analyse + rapport en artefact, sans push ni MR.
+- Échec du scan d'un microservice = warning dans le rapport, pas d'échec global du pipeline.
+- Rapport JSON brut Xray conservé en artefact CI (rétention 30 jours) pour la traçabilité.
+- Scripts lisibles et testables (bash ou Python), commentés, avec un README expliquant la mise en place du schedule et des variables.
+
+Livrables
+.gitlab-ci.yml modifié, scripts du job Xray et d'agrégation, ajustements Renovate si nécessaires, README. Termine par un résumé des fichiers modifiés et des actions manuelles à faire de mon côté (variables CI, schedule, droits du token).
